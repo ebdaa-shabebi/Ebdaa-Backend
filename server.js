@@ -1,3 +1,6 @@
+require("dotenv").config();
+const axios = require("axios");
+const cron = require("node-cron");
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -7,9 +10,11 @@ const { Pool } = require("pg");
 
 const app = express();
 
-app.use(cors({
-  origin: "*"
-}));
+app.use(
+  cors({
+    origin: "*",
+  }),
+);
 
 app.use(express.json());
 
@@ -24,11 +29,11 @@ app.get("/ping", async (req, res) => {
 
     res.status(200).json({
       status: "awake",
-      time: new Date()
+      time: new Date(),
     });
   } catch (err) {
     res.status(500).json({
-      error: err.message
+      error: err.message,
     });
   }
 });
@@ -37,8 +42,8 @@ app.get("/ping", async (req, res) => {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false
-  }
+    rejectUnauthorized: false,
+  },
 });
 
 // ✅ STORAGE
@@ -46,7 +51,7 @@ const storage = multer.diskStorage({
   destination: "uploads/",
   filename: (req, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname));
-  }
+  },
 });
 
 const upload = multer({ storage });
@@ -66,13 +71,12 @@ app.post("/upload", upload.single("image"), async (req, res) => {
 
     const imageUrl = result.secure_url;
 
-    await pool.query(
-      "INSERT INTO images (url, category) VALUES ($1, $2)",
-      [imageUrl, category]
-    );
+    await pool.query("INSERT INTO images (url, category) VALUES ($1, $2)", [
+      imageUrl,
+      category,
+    ]);
 
     res.json({ imageUrl });
-
   } catch (err) {
     console.error(err);
     res.status(500).send("Upload error");
@@ -86,7 +90,7 @@ app.get("/images/:category", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM images WHERE category = $1 ORDER BY created_at DESC",
-      [category]
+      [category],
     );
 
     res.json(result.rows);
@@ -128,11 +132,10 @@ app.get("/image-video/:imageId", async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM image_videos WHERE image_id = $1",
-      [imageId]
+      [imageId],
     );
 
     res.json(result.rows);
-
   } catch (err) {
     console.error(err);
     res.status(500).send("Error fetching video");
@@ -141,65 +144,579 @@ app.get("/image-video/:imageId", async (req, res) => {
 
 // ✅ ADD VIDEO URL
 app.post("/add-video", async (req, res) => {
-
-  const {
-    key,
-    image_id,
-    youtube_url
-  } = req.body;
+  const { key, image_id, youtube_url } = req.body;
 
   if (key !== process.env.ADMIN_KEY) {
     return res.status(403).send("Unauthorized");
   }
 
   try {
-
     await pool.query(
       `
       INSERT INTO image_videos
       (image_id, youtube_url)
       VALUES ($1, $2)
       `,
-      [image_id, youtube_url]
+      [image_id, youtube_url],
     );
 
     res.send("Video Added");
-
   } catch (err) {
     console.error(err);
     res.status(500).send("Error adding video");
   }
-
 });
 
 // ✅ DELETE VIDEO
 app.delete("/delete-video/:id", async (req, res) => {
-
   const { id } = req.params;
 
   try {
-
-    await pool.query(
-      "DELETE FROM image_videos WHERE id = $1",
-      [id]
-    );
+    await pool.query("DELETE FROM image_videos WHERE id = $1", [id]);
 
     res.send("Video deleted");
-
   } catch (err) {
     console.error(err);
     res.status(500).send("Delete video error");
   }
-
 });
 const cloudinary = require("cloudinary").v2;
 
 cloudinary.config({
   cloud_name: process.env.CLOUD_NAME,
   api_key: process.env.API_KEY,
-  api_secret: process.env.API_SECRET
+  api_secret: process.env.API_SECRET,
 });
 
+// ===============================
+// GET ALL BILLBOARDS
+// ===============================
+app.get("/billboards", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM billboards
+      ORDER BY id ASC
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error fetching billboards");
+  }
+});
+
+// ===============================
+// GET SINGLE BILLBOARD
+// ===============================
+app.get("/billboards/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    const result = await pool.query(
+      `
+      SELECT *
+      FROM billboards
+      WHERE id = $1
+      `,
+      [id],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).send("Billboard not found");
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error fetching billboard");
+  }
+});
+
+// ===============================
+// ADD BILLBOARD
+// ===============================
+app.post("/billboards", async (req, res) => {
+  const {
+    board_code,
+    area,
+    address,
+    width,
+    height,
+    faces,
+    total_area,
+    status,
+    notes,
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `
+      INSERT INTO billboards
+      (
+        board_code,
+        area,
+        address,
+        width,
+        height,
+        faces,
+        total_area,
+        status,
+        notes
+      )
+
+      VALUES
+      (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9
+      )
+
+      RETURNING *
+      `,
+      [
+        board_code,
+        area,
+        address,
+        width,
+        height,
+        faces,
+        total_area,
+        status,
+        notes,
+      ],
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error adding billboard");
+  }
+});
+
+// ===============================
+// UPDATE BILLBOARD
+// ===============================
+app.put("/billboards/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const {
+    board_code,
+    area,
+    address,
+    width,
+    height,
+    faces,
+    total_area,
+    status,
+    notes,
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE billboards
+
+      SET
+
+      board_code = $1,
+      area = $2,
+      address = $3,
+      width = $4,
+      height = $5,
+      faces = $6,
+      total_area = $7,
+      status = $8,
+      notes = $9
+
+      WHERE id = $10
+
+      RETURNING *
+      `,
+      [
+        board_code,
+        area,
+        address,
+        width,
+        height,
+        faces,
+        total_area,
+        status,
+        notes,
+        id,
+      ],
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error updating billboard");
+  }
+});
+
+// ===============================
+// DELETE BILLBOARD
+// ===============================
+app.delete("/billboards/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await pool.query(
+      `
+      DELETE
+      FROM billboards
+      WHERE id = $1
+      `,
+      [id],
+    );
+
+    res.send("Billboard deleted");
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error deleting billboard");
+  }
+});
+
+// ===============================
+// GET ALL RENTALS
+// ===============================
+app.get("/rentals", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        r.*,
+        b.board_code,
+        b.area,
+        b.address
+      FROM billboard_rentals r
+      JOIN billboards b
+      ON r.billboard_id = b.id
+      ORDER BY r.id ASC
+    `);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error fetching rentals");
+  }
+});
+
+// ===============================
+// ADD RENTAL
+// ===============================
+app.post("/rentals", async (req, res) => {
+  const {
+    billboard_id,
+    customer_name,
+    customer_phone,
+    company_name,
+    rent_start,
+    rent_end,
+    contract_price,
+    notes,
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `
+      INSERT INTO billboard_rentals
+      (
+        billboard_id,
+        customer_name,
+        customer_phone,
+        company_name,
+        rent_start,
+        rent_end,
+        contract_price,
+        notes
+      )
+
+      VALUES
+      (
+        $1,$2,$3,$4,$5,$6,$7,$8
+      )
+
+      RETURNING *
+      `,
+      [
+        billboard_id,
+        customer_name,
+        customer_phone,
+        company_name,
+        rent_start,
+        rent_end,
+        contract_price,
+        notes,
+      ],
+    );
+
+    await pool.query(
+      `
+      UPDATE billboards
+      SET status='مؤجرة'
+      WHERE id=$1
+      `,
+      [billboard_id],
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("ADD RENTAL ERROR:", err);
+
+    res.status(500).json({
+      error: err.message,
+    });
+  }
+});
+
+// ===============================
+// UPDATE RENTAL
+// ===============================
+app.put("/rentals/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const {
+    billboard_id,
+    customer_name,
+    customer_phone,
+    company_name,
+    rent_start,
+    rent_end,
+    contract_price,
+    notes,
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      `
+      UPDATE billboard_rentals
+
+      SET
+          billboard_id = $1,
+          customer_name = $2,
+          customer_phone = $3,
+          company_name = $4,
+          rent_start = $5,
+          rent_end = $6,
+          contract_price = $7,
+          notes = $8,
+
+          reminder_6_month = false,
+          reminder_3_month = false,
+          reminder_1_month = false
+
+      WHERE id = $9
+
+      RETURNING *;
+      `,
+      [
+        billboard_id,
+        customer_name,
+        customer_phone,
+        company_name,
+        rent_start,
+        rent_end,
+        contract_price,
+        notes,
+        id,
+      ],
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error updating rental");
+  }
+});
+
+// ===============================
+// DELETE RENTAL
+// ===============================
+app.delete("/rentals/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Get the billboard ID before deleting the rental
+    const rentalResult = await pool.query(
+      `
+      SELECT billboard_id
+      FROM billboard_rentals
+      WHERE id = $1
+      `,
+      [id],
+    );
+
+    if (rentalResult.rows.length === 0) {
+      return res.status(404).send("Rental not found");
+    }
+
+    const billboardId = rentalResult.rows[0].billboard_id;
+
+    // Delete the rental
+    await pool.query(
+      `
+      DELETE FROM billboard_rentals
+      WHERE id = $1
+      `,
+      [id],
+    );
+
+    // Make the billboard available again
+    await pool.query(
+      `
+      UPDATE billboards
+      SET status = 'متاحة'
+      WHERE id = $1
+      `,
+      [billboardId],
+    );
+
+    res.send("Rental deleted");
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Error deleting rental");
+  }
+});
+
+async function sendWhatsApp(phone, message) {
+  try {
+    const response = await axios.post(
+      `https://graph.facebook.com/v23.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: phone,
+        type: "text",
+        text: {
+          preview_url: false,
+          body: message,
+        },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+
+    console.log("✅ WhatsApp sent:", response.data);
+  } catch (err) {
+    console.error("❌ WhatsApp Error:");
+
+    if (err.response) {
+      console.error(err.response.data);
+    } else {
+      console.error(err.message);
+    }
+  }
+}
+
+app.get("/test-whatsapp", async (req, res) => {
+  await sendWhatsApp("905068518358", "Hello from Ebdaa Media 🚀");
+
+  res.send("Done");
+});
+
+// ===============================
+// CHECK RENTAL REMINDERS
+// ===============================
+async function checkRentalReminders() {
+  try {
+    const result = await pool.query(`
+      SELECT *
+      FROM billboard_rentals
+    `);
+
+    const today = new Date();
+
+    for (const rental of result.rows) {
+      const endDate = new Date(rental.rent_end);
+
+      const diffDays = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+
+      if (diffDays <= 180 && !rental.reminder_6_month) {
+        await sendWhatsApp(
+          rental.customer_phone,
+          `📢 Reminder
+
+Customer: ${rental.customer_name}
+
+Your billboard contract will expire in 6 months.`,
+        );
+
+        await pool.query(
+          `
+        UPDATE billboard_rentals
+        SET reminder_6_month = true
+        WHERE id = $1
+        `,
+          [rental.id],
+        );
+      }
+
+      if (diffDays <= 90 && !rental.reminder_3_month) {
+        await sendWhatsApp(
+          rental.customer_phone,
+          `📢 Reminder
+
+Customer: ${rental.customer_name}
+
+Your billboard contract will expire in 3 months.`,
+        );
+
+        await pool.query(
+          `
+      UPDATE billboard_rentals
+      SET reminder_3_month = true
+      WHERE id = $1
+      `,
+          [rental.id],
+        );
+      }
+
+      if (diffDays <= 30 && !rental.reminder_1_month) {
+        await sendWhatsApp(
+          rental.customer_phone,
+          `📢 Reminder
+
+Customer: ${rental.customer_name}
+
+Your billboard contract will expire in 1 month.`,
+        );
+
+        // Contract expired
+        if (diffDays === -1) {
+          await pool.query(
+            `
+    UPDATE billboards
+    SET status = 'متاحة'
+    WHERE id = $1
+    `,
+            [rental.billboard_id],
+          );
+        }
+
+        await pool.query(
+          `
+      UPDATE billboard_rentals
+      SET reminder_1_month = true
+      WHERE id = $1
+      `,
+          [rental.id],
+        );
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+cron.schedule("0 9 * * *", () => {
+  console.log("Checking reminders...");
+
+  checkRentalReminders();
+});
+
+checkRentalReminders();
 // ✅ START SERVER
 const PORT = process.env.PORT || 5000;
 
