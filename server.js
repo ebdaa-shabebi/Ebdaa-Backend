@@ -54,9 +54,7 @@ const storage = multer.diskStorage({
   },
 });
 
-
 app.post("/login", (req, res) => {
-
   const { username, password } = req.body;
 
   if (
@@ -68,11 +66,9 @@ app.post("/login", (req, res) => {
 
   res.status(401).json({
     success: false,
-    message: "Invalid credentials"
+    message: "Invalid credentials",
   });
-
 });
-
 
 const upload = multer({ storage });
 
@@ -596,18 +592,44 @@ app.delete("/rentals/:id", async (req, res) => {
   }
 });
 
-async function sendWhatsApp(phone, message) {
+async function sendTemplate(phone, customerName, period, boardCode, endDate) {
   try {
+    const formattedDate = new Date(endDate).toLocaleDateString("en-GB");
+
     const response = await axios.post(
-      `https://graph.facebook.com/v23.0/${process.env.PHONE_NUMBER_ID}/messages`,
+      `https://graph.facebook.com/v25.0/${process.env.PHONE_NUMBER_ID}/messages`,
       {
         messaging_product: "whatsapp",
-        recipient_type: "individual",
         to: phone,
-        type: "text",
-        text: {
-          preview_url: false,
-          body: message,
+        type: "template",
+        template: {
+          name: "contract_expiry_notification_utility",
+          language: {
+            code: "ar",
+          },
+          components: [
+            {
+              type: "body",
+              parameters: [
+                {
+                  type: "text",
+                  text: customerName,
+                },
+                {
+                  type: "text",
+                  text: period,
+                },
+                {
+                  type: "text",
+                  text: boardCode,
+                },
+                {
+                  type: "text",
+                  text: formattedDate,
+                },
+              ],
+            },
+          ],
         },
       },
       {
@@ -618,7 +640,7 @@ async function sendWhatsApp(phone, message) {
       },
     );
 
-    console.log("✅ WhatsApp sent:", response.data);
+    console.log("✅ Reminder sent:", response.data);
   } catch (err) {
     console.error("❌ WhatsApp Error:");
 
@@ -631,7 +653,13 @@ async function sendWhatsApp(phone, message) {
 }
 
 app.get("/test-whatsapp", async (req, res) => {
-  await sendWhatsApp("905068518358", "Hello from Ebdaa Media 🚀");
+  await sendTemplate(
+    process.env.EBDAA_PHONE,
+    "أحمد محمد",
+    "3 أشهر",
+    "A-12",
+    "01/11/2026",
+  );
 
   res.send("Done");
 });
@@ -642,86 +670,97 @@ app.get("/test-whatsapp", async (req, res) => {
 async function checkRentalReminders() {
   try {
     const result = await pool.query(`
-      SELECT *
-      FROM billboard_rentals
+      SELECT
+        r.*,
+        b.board_code
+      FROM billboard_rentals r
+      JOIN billboards b
+      ON r.billboard_id = b.id
     `);
 
     const today = new Date();
 
     for (const rental of result.rows) {
       const endDate = new Date(rental.rent_end);
-
       const diffDays = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
 
-      if (diffDays <= 180 && !rental.reminder_6_month) {
-        await sendWhatsApp(
-          rental.customer_phone,
-          `📢 Reminder
-
-Customer: ${rental.customer_name}
-
-Your billboard contract will expire in 6 months.`,
+      // ===============================
+      // 6 MONTH REMINDER
+      // ===============================
+      if (diffDays <= 180 && diffDays > 90 && !rental.reminder_6_month) {
+        await sendTemplate(
+          process.env.EBDAA_PHONE,
+          rental.customer_name,
+          "6 أشهر",
+          rental.board_code,
+          rental.rent_end,
         );
 
         await pool.query(
           `
-        UPDATE billboard_rentals
-        SET reminder_6_month = true
-        WHERE id = $1
-        `,
+          UPDATE billboard_rentals
+          SET reminder_6_month = true
+          WHERE id = $1
+          `,
           [rental.id],
         );
       }
 
-      if (diffDays <= 90 && !rental.reminder_3_month) {
-        await sendWhatsApp(
-          rental.customer_phone,
-          `📢 Reminder
-
-Customer: ${rental.customer_name}
-
-Your billboard contract will expire in 3 months.`,
+      // ===============================
+      // 3 MONTH REMINDER
+      // ===============================
+      if (diffDays <= 90 && diffDays > 30 && !rental.reminder_3_month) {
+        await sendTemplate(
+          process.env.EBDAA_PHONE,
+          rental.customer_name,
+          "3 أشهر",
+          rental.board_code,
+          rental.rent_end,
         );
 
         await pool.query(
           `
-      UPDATE billboard_rentals
-      SET reminder_3_month = true
-      WHERE id = $1
-      `,
+          UPDATE billboard_rentals
+          SET reminder_3_month = true
+          WHERE id = $1
+          `,
           [rental.id],
         );
       }
 
-      if (diffDays <= 30 && !rental.reminder_1_month) {
-        await sendWhatsApp(
-          rental.customer_phone,
-          `📢 Reminder
-
-Customer: ${rental.customer_name}
-
-Your billboard contract will expire in 1 month.`,
+      // ===============================
+      // 1 MONTH REMINDER
+      // ===============================
+      if (diffDays <= 30 && diffDays > 0 && !rental.reminder_1_month) {
+        await sendTemplate(
+          process.env.EBDAA_PHONE,
+          rental.customer_name,
+          "شهر واحد",
+          rental.board_code,
+          rental.rent_end,
         );
-
-        // Contract expired
-        if (diffDays === -1) {
-          await pool.query(
-            `
-    UPDATE billboards
-    SET status = 'متاحة'
-    WHERE id = $1
-    `,
-            [rental.billboard_id],
-          );
-        }
 
         await pool.query(
           `
-      UPDATE billboard_rentals
-      SET reminder_1_month = true
-      WHERE id = $1
-      `,
+          UPDATE billboard_rentals
+          SET reminder_1_month = true
+          WHERE id = $1
+          `,
           [rental.id],
+        );
+      }
+
+      // ===============================
+      // CONTRACT EXPIRED
+      // ===============================
+      if (diffDays < 0) {
+        await pool.query(
+          `
+          UPDATE billboards
+          SET status = 'متاحة'
+          WHERE id = $1
+          `,
+          [rental.billboard_id],
         );
       }
     }
@@ -729,7 +768,6 @@ Your billboard contract will expire in 1 month.`,
     console.error(err);
   }
 }
-
 cron.schedule("0 9 * * *", () => {
   console.log("Checking reminders...");
 
