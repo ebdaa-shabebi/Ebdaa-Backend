@@ -1,5 +1,7 @@
 require("dotenv").config();
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 const cron = require("node-cron");
 const express = require("express");
 const cors = require("cors");
@@ -71,26 +73,6 @@ app.post("/login", (req, res) => {
 });
 
 const upload = multer({ storage });
-
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: Number(process.env.EMAIL_PORT),
-  secure: true,
-
-  family: 4,
-
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
-
-  logger: true,
-  debug: true,
-});
 
 // ✅ SERVE FILES
 app.use("/uploads", express.static("uploads"));
@@ -613,25 +595,11 @@ app.delete("/rentals/:id", async (req, res) => {
 });
 
 async function sendEmail(customerName, period, boardCode, endDate) {
-  console.log("========== sendEmail() called ==========");
-
-  console.log({
-    customerName,
-    period,
-    boardCode,
-    to: process.env.EMAIL_TO,
-    host: process.env.EMAIL_HOST,
-    port: process.env.EMAIL_PORT,
-    user: process.env.EMAIL_USER,
-  });
-
   try {
     const formattedDate = new Date(endDate).toLocaleDateString("en-GB");
 
-    console.log("About to send email...");
-
-    const info = await transporter.sendMail({
-      from: `"Ebdaa Billboard System" <${process.env.EMAIL_USER}>`,
+    const { data, error } = await resend.emails.send({
+      from: "Ebdaa Billboard <info@ebdaa-media.com>",
       to: process.env.EMAIL_TO,
       subject: `تنبيه: سينتهي عقد اللوحة ${boardCode} خلال ${period}`,
       html: `
@@ -639,12 +607,9 @@ async function sendEmail(customerName, period, boardCode, endDate) {
 
 <h2>تنبيه تلقائي</h2>
 
-<p>
-يوجد عقد لوحة إعلانية يقترب من موعد انتهائه.
-</p>
+<p>يوجد عقد لوحة إعلانية يقترب من موعد انتهائه.</p>
 
 <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse">
-
 <tr>
 <td><b>اسم العميل</b></td>
 <td>${customerName}</td>
@@ -664,7 +629,6 @@ async function sendEmail(customerName, period, boardCode, endDate) {
 <td><b>تاريخ انتهاء العقد</b></td>
 <td>${formattedDate}</td>
 </tr>
-
 </table>
 
 <p style="margin-top:20px">
@@ -675,17 +639,19 @@ async function sendEmail(customerName, period, boardCode, endDate) {
 `,
     });
 
-    console.log("✅ Email sent successfully");
-    console.log("Message ID:", info.messageId);
-    console.log("Accepted:", info.accepted);
-    console.log("Rejected:", info.rejected);
+    if (error) {
+      console.error("❌ Resend Error:");
+      console.error(JSON.stringify(error, null, 2));
+      return false;
+    }
+
+    console.log("✅ Email sent successfully!");
+    console.log(data);
 
     return true;
   } catch (err) {
-    console.error("❌ Email Error");
+    console.error("❌ Exception:");
     console.error(err);
-
-    // Don't crash the reminder job.
     return false;
   }
 }

@@ -22,6 +22,7 @@
     "nodemailer": "^9.0.3",
     "pg": "^8.20.0",
     "qrcode-terminal": "^0.12.0",
+    "resend": "^6.18.1",
     "whatsapp-web.js": "^1.34.7"
   }
 }
