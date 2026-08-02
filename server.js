@@ -1,5 +1,5 @@
 require("dotenv").config();
-const axios = require("axios");
+const nodemailer = require("nodemailer");
 const cron = require("node-cron");
 const express = require("express");
 const cors = require("cors");
@@ -71,6 +71,16 @@ app.post("/login", (req, res) => {
 });
 
 const upload = multer({ storage });
+
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST,
+  port: process.env.EMAIL_PORT,
+  secure: true,
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
 // ✅ SERVE FILES
 app.use("/uploads", express.static("uploads"));
@@ -592,77 +602,63 @@ app.delete("/rentals/:id", async (req, res) => {
   }
 });
 
-async function sendTemplate(phone, customerName, period, boardCode, endDate) {
+async function sendEmail(customerName, period, boardCode, endDate) {
   try {
     const formattedDate = new Date(endDate).toLocaleDateString("en-GB");
 
-    const response = await axios.post(
-      `https://graph.facebook.com/v25.0/${process.env.PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: phone,
-        type: "template",
-        template: {
-          name: "contract_expiry_notification_utility",
-          language: {
-            code: "ar",
-          },
-          components: [
-            {
-              type: "body",
-              parameters: [
-                {
-                  type: "text",
-                  text: customerName,
-                },
-                {
-                  type: "text",
-                  text: period,
-                },
-                {
-                  type: "text",
-                  text: boardCode,
-                },
-                {
-                  type: "text",
-                  text: formattedDate,
-                },
-              ],
-            },
-          ],
-        },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.ACCESS_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      },
-    );
+    await transporter.sendMail({
+      from: `"Ebdaa Billboard System" <${process.env.EMAIL_USER}>`,
+      to: process.env.EMAIL_TO,
+      subject: `تنبيه: سينتهي عقد اللوحة ${boardCode} خلال ${period}`,
 
-    console.log("✅ Reminder sent:", response.data);
+      html: `
+<div dir="rtl" style="font-family:Arial,sans-serif">
+
+<h2>تنبيه تلقائي</h2>
+
+<p>
+يوجد عقد لوحة إعلانية يقترب من موعد انتهائه.
+</p>
+
+<table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse">
+
+<tr>
+<td><b>اسم العميل</b></td>
+<td>${customerName}</td>
+</tr>
+
+<tr>
+<td><b>رقم اللوحة</b></td>
+<td>${boardCode}</td>
+</tr>
+
+<tr>
+<td><b>المدة المتبقية</b></td>
+<td>${period}</td>
+</tr>
+
+<tr>
+<td><b>تاريخ انتهاء العقد</b></td>
+<td>${formattedDate}</td>
+</tr>
+
+</table>
+
+<p style="margin-top:20px">
+يرجى التواصل مع العميل قبل انتهاء العقد.
+</p>
+
+</div>
+`,
+    });
+
+    console.log("✅ Email sent");
   } catch (err) {
-    console.error("❌ WhatsApp Error:");
-
-    if (err.response) {
-      console.error(err.response.data);
-    } else {
-      console.error(err.message);
-    }
+    console.error("❌ Email Error");
+    console.error(err);
+    throw err;
   }
 }
-
-app.get("/test-whatsapp", async (req, res) => {
-  await sendTemplate(
-    process.env.EBDAA_PHONE,
-    "أحمد محمد",
-    "3 أشهر",
-    "A-12",
-    "01/11/2026",
-  );
-
-  res.send("Done");
-});
 
 // ===============================
 // CHECK RENTAL REMINDERS
@@ -688,8 +684,7 @@ async function checkRentalReminders() {
       // 6 MONTH REMINDER
       // ===============================
       if (diffDays <= 180 && diffDays > 90 && !rental.reminder_6_month) {
-        await sendTemplate(
-          process.env.EBDAA_PHONE,
+        await sendEmail(
           rental.customer_name,
           "6 أشهر",
           rental.board_code,
@@ -710,8 +705,7 @@ async function checkRentalReminders() {
       // 3 MONTH REMINDER
       // ===============================
       if (diffDays <= 90 && diffDays > 30 && !rental.reminder_3_month) {
-        await sendTemplate(
-          process.env.EBDAA_PHONE,
+        await sendEmail(
           rental.customer_name,
           "3 أشهر",
           rental.board_code,
@@ -732,8 +726,7 @@ async function checkRentalReminders() {
       // 1 MONTH REMINDER
       // ===============================
       if (diffDays <= 30 && diffDays > 0 && !rental.reminder_1_month) {
-        await sendTemplate(
-          process.env.EBDAA_PHONE,
+        await sendEmail(
           rental.customer_name,
           "شهر واحد",
           rental.board_code,
@@ -766,6 +759,7 @@ async function checkRentalReminders() {
     }
   } catch (err) {
     console.error(err);
+    throw err;
   }
 }
 cron.schedule("0 9 * * *", () => {
