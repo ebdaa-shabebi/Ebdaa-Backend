@@ -664,6 +664,8 @@ async function sendEmail(customerName, period, boardCode, endDate) {
 // CHECK RENTAL REMINDERS
 // ===============================
 async function checkRentalReminders() {
+  console.log("=== Reminder check started ===");
+
   try {
     const result = await pool.query(`
       SELECT
@@ -674,11 +676,21 @@ async function checkRentalReminders() {
       ON r.billboard_id = b.id
     `);
 
+    console.log("Rentals found:", result.rows.length);
+
     const today = new Date();
+    console.log("Today:", today);
 
     for (const rental of result.rows) {
       const endDate = new Date(rental.rent_end);
       const diffDays = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+
+      console.log(
+        rental.board_code,
+        rental.customer_name,
+        "Days left:",
+        diffDays
+      );
 
       // ===============================
       // 6 MONTH REMINDER
@@ -762,10 +774,9 @@ async function checkRentalReminders() {
     throw err;
   }
 }
-cron.schedule("0 9 * * *", () => {
-  console.log("Checking reminders...");
-
-  checkRentalReminders();
+cron.schedule("* * * * *", () => {
+    console.log("Cron fired");
+    checkRentalReminders();
 });
 
 checkRentalReminders();
