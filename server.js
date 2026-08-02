@@ -770,10 +770,13 @@ async function checkRentalReminders() {
     throw err;
   }
 }
-cron.schedule("* * * * *", () => {
-    console.log("Cron fired");
-    checkRentalReminders();
-});
+cron.schedule(
+  "0 9 * * *",
+  checkRentalReminders,
+  {
+    timezone: "Europe/Istanbul",
+  }
+);
 
 checkRentalReminders();
 // ✅ START SERVER
