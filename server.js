@@ -603,16 +603,29 @@ app.delete("/rentals/:id", async (req, res) => {
 });
 
 async function sendEmail(customerName, period, boardCode, endDate) {
+  console.log("========== sendEmail() called ==========");
+
+  console.log({
+    customerName,
+    period,
+    boardCode,
+    to: process.env.EMAIL_TO,
+    host: process.env.EMAIL_HOST,
+    port: process.env.EMAIL_PORT,
+    user: process.env.EMAIL_USER,
+  });
+
   try {
     const formattedDate = new Date(endDate).toLocaleDateString("en-GB");
 
-    await transporter.sendMail({
+    console.log("About to send email...");
+
+    const info = await transporter.sendMail({
       from: `"Ebdaa Billboard System" <${process.env.EMAIL_USER}>`,
       to: process.env.EMAIL_TO,
       subject: `تنبيه: سينتهي عقد اللوحة ${boardCode} خلال ${period}`,
-
       html: `
-<div dir="rtl" style="font-family:Arial,sans-serif">
+<div dir="rtl" style="font-family: Arial, sans-serif">
 
 <h2>تنبيه تلقائي</h2>
 
@@ -652,11 +665,18 @@ async function sendEmail(customerName, period, boardCode, endDate) {
 `,
     });
 
-    console.log("✅ Email sent");
+    console.log("✅ Email sent successfully");
+    console.log("Message ID:", info.messageId);
+    console.log("Accepted:", info.accepted);
+    console.log("Rejected:", info.rejected);
+
+    return true;
   } catch (err) {
     console.error("❌ Email Error");
     console.error(err);
-    throw err;
+
+    // Don't crash the reminder job.
+    return false;
   }
 }
 
